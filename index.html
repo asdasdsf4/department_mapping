@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Department & Section Mapper</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22d3ee;
+      --old: #f97316;
+      --new: #34d399;
+      --danger: #f43f5e;
+      --line: #475569;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #1e293b, var(--bg));
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      gap: 16px;
+    }
+    .card {
+      background: rgba(17, 24, 39, 0.92);
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 14px;
+      backdrop-filter: blur(4px);
+    }
+    h1, h2, h3 { margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0; }
+
+    .upload-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+
+    label { font-size: 0.9rem; color: #cbd5e1; }
+    input[type="file"], input[type="text"], select {
+      width: 100%;
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 9px;
+      margin-top: 6px;
+    }
+
+    button {
+      background: linear-gradient(90deg, #0ea5e9, #22d3ee);
+      border: none;
+      color: #062027;
+      font-weight: 700;
+      border-radius: 9px;
+      padding: 10px 12px;
+      cursor: pointer;
+    }
+    button.secondary { background: #334155; color: var(--text); }
+    button.warn { background: var(--danger); color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .main {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      min-height: 580px;
+    }
+    .pane {
+      background: #0b1220;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 580px;
+    }
+    .pane h3 { padding: 12px 12px 0; }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .list {
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .node {
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #0f172a;
+      padding: 9px;
+      display: grid;
+      gap: 4px;
+      cursor: pointer;
+      position: relative;
+    }
+    .node.old { border-left: 4px solid var(--old); }
+    .node.new { border-left: 4px solid var(--new); }
+    .node.selected { box-shadow: 0 0 0 2px #22d3ee; }
+    .node.mapped { opacity: 0.65; }
+
+    .node .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    .chip {
+      font-size: .72rem;
+      border: 1px solid #334155;
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: #cbd5e1;
+    }
+    .tiny { font-size: .78rem; color: var(--muted); }
+
+    #wires {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .status {
+      color: #93c5fd;
+      font-weight: 600;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+      margin-top: 10px;
+    }
+    th, td {
+      border-bottom: 1px solid #334155;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: #cbd5e1; background: #111827; position: sticky; top: 0; }
+    .mapping-wrap { max-height: 260px; overflow: auto; }
+
+    .badge {
+      display: inline-block;
+      background: #1d4ed8;
+      color: #dbeafe;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .75rem;
+      margin-left: 8px;
+    }
+
+    @media (max-width: 1040px) {
+      .main { grid-template-columns: 1fr; }
+      #wires { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Department & Section Mapping Studio</h1>
+      <p class="sub">Upload old and new Excel masters, filter dynamic hierarchy levels, map records visually, and export a developer-ready mapping sheet.</p>
+      <div class="upload-grid">
+        <div>
+          <label>Old structure Excel (.xlsx/.xls)</label>
+          <input id="oldFile" type="file" accept=".xlsx,.xls" />
+        </div>
+        <div>
+          <label>New structure Excel (.xlsx/.xls)</label>
+          <input id="newFile" type="file" accept=".xlsx,.xls" />
+        </div>
+        <button id="loadSample" class="secondary">Load Sample Data</button>
+      </div>
+    </div>
+
+    <div class="card actions">
+      <button id="connectBtn">Connect Selected (Thread Map)</button>
+      <button id="removeBtn" class="secondary">Remove Selected Mapping</button>
+      <button id="clearBtn" class="warn">Clear All Mappings</button>
+      <button id="exportBtn">Export Mapping Excel</button>
+      <span id="status" class="status">Select one OLD and one NEW item to map.</span>
+    </div>
+
+    <div class="main card" id="stage">
+      <svg id="wires"></svg>
+
+      <section class="pane" id="oldPane">
+        <h3>Old Departments/Sections <span class="badge" id="oldCount">0</span></h3>
+        <div class="filters">
+          <input id="oldSearch" type="text" placeholder="Search by name/id/parent" />
+          <select id="oldLevel"><option value="">All levels</option></select>
+          <select id="oldBu"><option value="">All BU_TYPE_ID</option></select>
+          <select id="oldMapped">
+            <option value="all">All</option>
+            <option value="unmapped">Unmapped only</option>
+            <option value="mapped">Mapped only</option>
+          </select>
+        </div>
+        <div class="list" id="oldList"></div>
+      </section>
+
+      <section class="pane" id="newPane">
+        <h3>New Departments/Sections <span class="badge" id="newCount">0</span></h3>
+        <div class="filters">
+          <input id="newSearch" type="text" placeholder="Search by name/id/parent" />
+          <select id="newLevel"><option value="">All levels</option></select>
+          <select id="newBu"><option value="">All BU_TYPE_ID</option></select>
+          <select id="newMapped">
+            <option value="all">All</option>
+            <option value="unmapped">Unmapped only</option>
+            <option value="mapped">Mapped only</option>
+          </select>
+        </div>
+        <div class="list" id="newList"></div>
+      </section>
+    </div>
+
+    <div class="card">
+      <h2>Current Mapping Table</h2>
+      <p class="sub">This table is exported for developers to migrate transaction records from old to new hierarchy IDs.</p>
+      <div class="mapping-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Old ID</th>
+              <th>Old Name</th>
+              <th>Old Level</th>
+              <th>New ID</th>
+              <th>New Name</th>
+              <th>New Level</th>
+              <th>Old Parent</th>
+              <th>New Parent</th>
+            </tr>
+          </thead>
+          <tbody id="mappingBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sampleOld = [
+      { dept_or_section_id: 2, name: "Assembly", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 3, name: "Part Development", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 4, name: "Quality", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 5, name: "Production Control", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 6, name: "Engine Production Control", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" }
+    ];
+
+    const sampleNew = [
+      { dept_or_section_id: 79, name: "Security Center", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 95, name: "Aftersales Service", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 101, name: "Audit", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 104, name: "Business Planning", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" },
+      { dept_or_section_id: 108, name: "Cost Accounting", BU_TYPE_ID: 5, level_type: "DEPARTMENT (Parent)", PARENT_ID: 1, parent_dept_name: "KIA" }
+    ];
+
+    const state = {
+      oldRows: [],
+      newRows: [],
+      selectedOld: null,
+      selectedNew: null,
+      mappings: new Map()
+    };
+
+    const byId = id => document.getElementById(id);
+
+    function normalizeRows(rows) {
+      return rows
+        .map(r => ({
+          dept_or_section_id: Number(r.dept_or_section_id ?? r.ID ?? r.id ?? 0),
+          name: String(r.name ?? r.Name ?? "").trim(),
+          BU_TYPE_ID: String(r.BU_TYPE_ID ?? r.bu_type_id ?? ""),
+          level_type: String(r.level_type ?? r.level ?? "").trim(),
+          PARENT_ID: String(r.PARENT_ID ?? r.parent_id ?? ""),
+          parent_dept_name: String(r.parent_dept_name ?? r.parent_name ?? "").trim()
+        }))
+        .filter(r => r.dept_or_section_id && r.name);
+    }
+
+    function parseExcel(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const wb = XLSX.read(e.target.result, { type: "binary" });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+            resolve(normalizeRows(json));
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsBinaryString(file);
+      });
+    }
+
+    function setStatus(msg) { byId("status").textContent = msg; }
+
+    function populateSelect(selectId, values) {
+      const sel = byId(selectId);
+      const current = sel.value;
+      sel.innerHTML = sel.querySelector("option").outerHTML;
+      [...new Set(values.filter(Boolean))].sort().forEach(v => {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        sel.appendChild(o);
+      });
+      if ([...sel.options].some(o => o.value === current)) sel.value = current;
+    }
+
+    function depthForRow(row, allRows) {
+      const parentMap = new Map(allRows.map(r => [String(r.dept_or_section_id), String(r.PARENT_ID)]));
+      let depth = 0;
+      let p = String(row.PARENT_ID);
+      const seen = new Set();
+      while (p && p !== "0" && p !== "1" && !seen.has(p) && parentMap.has(p)) {
+        depth++;
+        seen.add(p);
+        p = parentMap.get(p);
+      }
+      return depth;
+    }
+
+    function filteredRows(type) {
+      const rows = type === "old" ? state.oldRows : state.newRows;
+      const search = byId(`${type}Search`).value.toLowerCase().trim();
+      const level = byId(`${type}Level`).value;
+      const bu = byId(`${type}Bu`).value;
+      const mappedFilter = byId(`${type}Mapped`).value;
+      return rows.filter(r => {
+        const mapped = type === "old"
+          ? state.mappings.has(String(r.dept_or_section_id))
+          : [...state.mappings.values()].includes(String(r.dept_or_section_id));
+        if (level && r.level_type !== level) return false;
+        if (bu && String(r.BU_TYPE_ID) !== String(bu)) return false;
+        if (mappedFilter === "mapped" && !mapped) return false;
+        if (mappedFilter === "unmapped" && mapped) return false;
+        if (!search) return true;
+        const hay = `${r.dept_or_section_id} ${r.name} ${r.parent_dept_name} ${r.level_type}`.toLowerCase();
+        return hay.includes(search);
+      });
+    }
+
+    function renderList(type) {
+      const list = byId(`${type}List`);
+      const rows = filteredRows(type);
+      const allRows = type === "old" ? state.oldRows : state.newRows;
+      byId(`${type}Count`).textContent = `${rows.length}/${allRows.length}`;
+      list.innerHTML = "";
+
+      rows.forEach(r => {
+        const id = String(r.dept_or_section_id);
+        const el = document.createElement("div");
+        el.className = `node ${type}`;
+        const isMapped = type === "old"
+          ? state.mappings.has(id)
+          : [...state.mappings.values()].includes(id);
+        if (isMapped) el.classList.add("mapped");
+        const selected = type === "old" ? state.selectedOld === id : state.selectedNew === id;
+        if (selected) el.classList.add("selected");
+
+        const indent = depthForRow(r, allRows) * 16;
+        el.style.marginLeft = `${indent}px`;
+        el.dataset.id = id;
+        el.innerHTML = `
+          <div class="top">
+            <strong>${r.name}</strong>
+            <span class="chip">ID ${r.dept_or_section_id}</span>
+          </div>
+          <div class="tiny">${r.level_type || "(no level)"} | BU ${r.BU_TYPE_ID || "-"}</div>
+          <div class="tiny">Parent: ${r.parent_dept_name || "-"} (${r.PARENT_ID || "-"})</div>
+        `;
+        el.onclick = () => {
+          if (type === "old") state.selectedOld = id;
+          else state.selectedNew = id;
+          renderAll();
+        };
+        list.appendChild(el);
+      });
+    }
+
+    function rowById(type, id) {
+      const rows = type === "old" ? state.oldRows : state.newRows;
+      return rows.find(r => String(r.dept_or_section_id) === String(id));
+    }
+
+    function renderMappings() {
+      const body = byId("mappingBody");
+      body.innerHTML = "";
+      [...state.mappings.entries()].forEach(([oldId, newId]) => {
+        const o = rowById("old", oldId);
+        const n = rowById("new", newId);
+        if (!o || !n) return;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${o.dept_or_section_id}</td>
+          <td>${o.name}</td>
+          <td>${o.level_type}</td>
+          <td>${n.dept_or_section_id}</td>
+          <td>${n.name}</td>
+          <td>${n.level_type}</td>
+          <td>${o.parent_dept_name} (${o.PARENT_ID})</td>
+          <td>${n.parent_dept_name} (${n.PARENT_ID})</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    function drawWires() {
+      const svg = byId("wires");
+      svg.innerHTML = "";
+      const stageRect = byId("stage").getBoundingClientRect();
+      const oldNodes = new Map([...document.querySelectorAll(".node.old")].map(n => [n.dataset.id, n]));
+      const newNodes = new Map([...document.querySelectorAll(".node.new")].map(n => [n.dataset.id, n]));
+
+      state.mappings.forEach((newId, oldId) => {
+        const a = oldNodes.get(oldId);
+        const b = newNodes.get(String(newId));
+        if (!a || !b) return;
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const x1 = ar.right - stageRect.left;
+        const y1 = ar.top + ar.height / 2 - stageRect.top;
+        const x2 = br.left - stageRect.left;
+        const y2 = br.top + br.height / 2 - stageRect.top;
+        const c1 = x1 + 80;
+        const c2 = x2 - 80;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", `M ${x1},${y1} C ${c1},${y1} ${c2},${y2} ${x2},${y2}`);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#22d3ee");
+        path.setAttribute("stroke-width", "2.2");
+        path.setAttribute("opacity", "0.95");
+        svg.appendChild(path);
+      });
+    }
+
+    function renderAll() {
+      renderList("old");
+      renderList("new");
+      renderMappings();
+      drawWires();
+      const o = state.selectedOld ? rowById("old", state.selectedOld)?.name : "none";
+      const n = state.selectedNew ? rowById("new", state.selectedNew)?.name : "none";
+      setStatus(`Selected OLD: ${o || "none"} | Selected NEW: ${n || "none"}`);
+    }
+
+    function setupFilters() {
+      ["oldSearch","oldLevel","oldBu","oldMapped","newSearch","newLevel","newBu","newMapped"].forEach(id => {
+        byId(id).addEventListener("input", renderAll);
+        byId(id).addEventListener("change", renderAll);
+      });
+    }
+
+    function refreshFilterOptions() {
+      populateSelect("oldLevel", state.oldRows.map(r => r.level_type));
+      populateSelect("newLevel", state.newRows.map(r => r.level_type));
+      populateSelect("oldBu", state.oldRows.map(r => String(r.BU_TYPE_ID)));
+      populateSelect("newBu", state.newRows.map(r => String(r.BU_TYPE_ID)));
+    }
+
+    async function loadFiles() {
+      const oldFile = byId("oldFile").files[0];
+      const newFile = byId("newFile").files[0];
+      if (!oldFile || !newFile) {
+        setStatus("Please upload both OLD and NEW Excel files.");
+        return;
+      }
+      try {
+        state.oldRows = await parseExcel(oldFile);
+        state.newRows = await parseExcel(newFile);
+        state.mappings.clear();
+        state.selectedOld = null;
+        state.selectedNew = null;
+        refreshFilterOptions();
+        renderAll();
+        setStatus(`Loaded ${state.oldRows.length} old and ${state.newRows.length} new records.`);
+      } catch (err) {
+        console.error(err);
+        setStatus("Could not read Excel files. Ensure first sheet has correct headers.");
+      }
+    }
+
+    function exportMapping() {
+      if (!state.mappings.size) {
+        setStatus("No mappings to export yet.");
+        return;
+      }
+      const rows = [...state.mappings.entries()].map(([oldId, newId]) => {
+        const oldRow = rowById("old", oldId);
+        const newRow = rowById("new", newId);
+        return {
+          old_id: oldRow?.dept_or_section_id,
+          old_name: oldRow?.name,
+          old_level_type: oldRow?.level_type,
+          old_parent_id: oldRow?.PARENT_ID,
+          old_parent_name: oldRow?.parent_dept_name,
+          new_id: newRow?.dept_or_section_id,
+          new_name: newRow?.name,
+          new_level_type: newRow?.level_type,
+          new_parent_id: newRow?.PARENT_ID,
+          new_parent_name: newRow?.parent_dept_name,
+          mapped_at: new Date().toISOString()
+        };
+      });
+
+      if (window.XLSX) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "mapping");
+        XLSX.writeFile(wb, "department_section_mapping.xlsx");
+      } else {
+        const csvHeader = Object.keys(rows[0]).join(",");
+        const csvRows = rows.map(r => Object.values(r).map(v => `"${String(v ?? "").replaceAll('"','""')}"`).join(","));
+        const blob = new Blob([[csvHeader, ...csvRows].join("\n")], { type: "text/csv" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "department_section_mapping.csv";
+        a.click();
+      }
+      setStatus("Mapping export generated.");
+    }
+
+    byId("oldFile").addEventListener("change", loadFiles);
+    byId("newFile").addEventListener("change", loadFiles);
+    byId("loadSample").addEventListener("click", () => {
+      state.oldRows = normalizeRows(sampleOld);
+      state.newRows = normalizeRows(sampleNew);
+      state.mappings.clear();
+      state.selectedOld = null;
+      state.selectedNew = null;
+      refreshFilterOptions();
+      renderAll();
+      setStatus("Sample data loaded.");
+    });
+
+    byId("connectBtn").addEventListener("click", () => {
+      if (!state.selectedOld || !state.selectedNew) {
+        setStatus("Pick one OLD and one NEW item first.");
+        return;
+      }
+      const oldId = String(state.selectedOld);
+      const newId = String(state.selectedNew);
+      for (const [k, v] of state.mappings.entries()) {
+        if (v === newId && k !== oldId) state.mappings.delete(k);
+      }
+      state.mappings.set(oldId, newId);
+      renderAll();
+      setStatus(`Mapped old ${oldId} → new ${newId}.`);
+    });
+
+    byId("removeBtn").addEventListener("click", () => {
+      if (!state.selectedOld) {
+        setStatus("Select an OLD item to remove its mapping.");
+        return;
+      }
+      state.mappings.delete(String(state.selectedOld));
+      renderAll();
+      setStatus("Mapping removed for selected OLD item.");
+    });
+
+    byId("clearBtn").addEventListener("click", () => {
+      state.mappings.clear();
+      renderAll();
+      setStatus("All mappings cleared.");
+    });
+
+    byId("exportBtn").addEventListener("click", exportMapping);
+    window.addEventListener("resize", drawWires);
+    byId("oldList").addEventListener("scroll", drawWires);
+    byId("newList").addEventListener("scroll", drawWires);
+
+    setupFilters();
+    byId("loadSample").click();
+  </script>
+</body>
+</html>
