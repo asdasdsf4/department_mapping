@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Department/Section Tree Mapper</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg:#0b1220; --panel:#111827; --text:#e5e7eb; --muted:#9ca3af; --line:#334155;
+      --old:#fb923c; --new:#34d399; --link:#22d3ee;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:radial-gradient(circle at top right,#1e293b,var(--bg));color:var(--text)}
+    .wrap{max-width:1600px;margin:0 auto;padding:18px;display:grid;gap:14px}
+    .card{background:rgba(17,24,39,.93);border:1px solid #334155;border-radius:12px;padding:12px}
+    h1,h2,h3{margin:0 0 8px}.sub{margin:0;color:var(--muted)}
+    .upload{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;align-items:end}
+    input,select,button{border-radius:8px;border:1px solid #334155;background:#0f172a;color:var(--text);padding:9px}
+    button{cursor:pointer;font-weight:700;background:linear-gradient(90deg,#0ea5e9,#22d3ee);color:#062027;border:none}
+    button.secondary{background:#334155;color:var(--text)} button.warn{background:#e11d48;color:#fff}
+
+    .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.status{color:#93c5fd;font-weight:600}
+    .stage{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:620px}
+    #wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+    .pane{border:1px solid #334155;border-radius:10px;overflow:hidden;background:#0b1220;display:grid;grid-template-rows:auto auto 1fr;min-height:620px}
+    .pane h3{padding:10px 12px 0}.filters{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;padding:10px;border-bottom:1px solid #1e293b}
+    .tree{overflow:auto;padding:10px}
+
+    .node{display:grid;gap:2px;border:1px solid #334155;background:#0f172a;border-radius:8px;padding:6px;margin:6px 0;position:relative}
+    .node.old{border-left:4px solid var(--old)} .node.new{border-left:4px solid var(--new)} .node.selected{box-shadow:0 0 0 2px #22d3ee}
+    .node .top{display:flex;gap:8px;align-items:center}.toggle{cursor:pointer;color:#cbd5e1;width:16px;text-align:center}
+    .chip{font-size:.72rem;border:1px solid #334155;padding:1px 7px;border-radius:999px;color:#cbd5e1;margin-left:auto}
+    .tiny{font-size:.76rem;color:var(--muted)} .indent{padding-left:18px;border-left:1px dashed #334155;margin-left:7px}
+    .muted{color:var(--muted)}
+
+    table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{padding:8px;border-bottom:1px solid #334155}th{position:sticky;top:0;background:#111827}
+    .table-wrap{max-height:280px;overflow:auto}
+
+    @media(max-width:1050px){.stage{grid-template-columns:1fr}#wires{display:none}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Department/Section Tree Mapper</h1>
+    <p class="sub">Build trees from <code>PARENT_ID</code> → <code>dept_or_section_id</code>, visually map any old node to any new node (many-to-many), and export migration-ready output.</p>
+    <div class="upload">
+      <div><label>Old Excel</label><input id="oldFile" type="file" accept=".xlsx,.xls"/></div>
+      <div><label>New Excel</label><input id="newFile" type="file" accept=".xlsx,.xls"/></div>
+      <button id="loadSample" class="secondary">Load Sample Data</button>
+    </div>
+  </div>
+
+  <div class="card actions">
+    <button id="mapBtn">Create Mapping Link</button>
+    <button id="removeLinkBtn" class="secondary">Remove Selected Link</button>
+    <button id="clearBtn" class="warn">Clear All Links</button>
+    <button id="exportBtn">Export Mapping Excel</button>
+    <select id="selectedLink"><option value="">Select link to remove</option></select>
+    <span id="status" class="status">Select one old node and one new node.</span>
+  </div>
+
+  <div class="card stage" id="stage">
+    <svg id="wires"></svg>
+    <section class="pane">
+      <h3>Old Tree</h3>
+      <div class="filters">
+        <input id="oldSearch" placeholder="Search old..."/>
+        <select id="oldLevel"><option value="">All levels</option></select>
+        <select id="oldType"><option value="">Any type</option><option value="department">Department</option><option value="section">Section</option></select>
+        <select id="oldMapped"><option value="all">All</option><option value="mapped">Mapped</option><option value="unmapped">Unmapped</option></select>
+      </div>
+      <div id="oldTree" class="tree"></div>
+    </section>
+
+    <section class="pane">
+      <h3>New Tree</h3>
+      <div class="filters">
+        <input id="newSearch" placeholder="Search new..."/>
+        <select id="newLevel"><option value="">All levels</option></select>
+        <select id="newType"><option value="">Any type</option><option value="department">Department</option><option value="section">Section</option></select>
+        <select id="newMapped"><option value="all">All</option><option value="mapped">Mapped</option><option value="unmapped">Unmapped</option></select>
+      </div>
+      <div id="newTree" class="tree"></div>
+    </section>
+  </div>
+
+  <div class="card">
+    <h2>Output Preview (Old Department / Old Section / New Department / New Section)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Old Department</th><th>Old Section</th><th>New Department</th><th>New Section</th>
+          </tr>
+        </thead>
+        <tbody id="mappingBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const sampleOld=[
+{dept_or_section_id:2,name:"Assembly",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:3,name:"Part Development",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:4,name:"Quality",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:5,name:"Production Control",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:6,name:"Engine Production Control",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"}
+];
+const sampleNew=[
+{dept_or_section_id:79,name:"Security Center",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:95,name:"Aftersales Service",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:101,name:"Audit",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:104,name:"Business Planning",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"},
+{dept_or_section_id:108,name:"Cost Accounting",BU_TYPE_ID:5,level_type:"DEPARTMENT (Parent)",PARENT_ID:1,parent_dept_name:"KIA"}
+];
+
+const s={oldRows:[],newRows:[],oldTree:[],newTree:[],selectedOld:null,selectedNew:null,expandedOld:new Set(),expandedNew:new Set(),links:[]};
+const $=id=>document.getElementById(id);
+const k=(t,id)=>`${t}:${id}`;
+const nodeType=r=>/section/i.test(r.level_type)?'section':(/department/i.test(r.level_type)?'department':'other');
+const setStatus=m=>$("status").textContent=m;
+
+function normalizeRows(rows){
+  return rows.map(r=>({
+    dept_or_section_id:Number(r.dept_or_section_id??r.ID??r.id??0),
+    name:String(r.name??r.Name??"").trim(),
+    BU_TYPE_ID:String(r.BU_TYPE_ID??""),
+    level_type:String(r.level_type??r.level??"").trim(),
+    PARENT_ID:String(r.PARENT_ID??r.parent_id??""),
+    parent_dept_name:String(r.parent_dept_name??r.parent_name??"").trim(),
+  })).filter(r=>r.dept_or_section_id&&r.name);
+}
+
+function parseExcel(file){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'binary'});const ws=wb.Sheets[wb.SheetNames[0]];resolve(normalizeRows(XLSX.utils.sheet_to_json(ws,{defval:''})));}catch(err){reject(err);}};
+    fr.onerror=reject;fr.readAsBinaryString(file);
+  });
+}
+
+function buildTree(rows){
+  const byId=new Map(rows.map(r=>[String(r.dept_or_section_id),{...r,children:[],depth:0}]));
+  const roots=[];
+  byId.forEach(n=>{
+    const p=byId.get(String(n.PARENT_ID));
+    if(p && String(n.dept_or_section_id)!==String(n.PARENT_ID)) p.children.push(n);
+    else roots.push(n);
+  });
+  const visit=(n,d)=>{n.depth=d;n.children.sort((a,b)=>a.name.localeCompare(b.name));n.children.forEach(c=>visit(c,d+1));};
+  roots.sort((a,b)=>a.name.localeCompare(b.name));roots.forEach(r=>visit(r,0));
+  return roots;
+}
+
+function flatten(tree){const out=[];const walk=n=>{out.push(n);n.children.forEach(walk)};tree.forEach(walk);return out;}
+function getNode(type,id){return flatten(type==='old'?s.oldTree:s.newTree).find(n=>String(n.dept_or_section_id)===String(id));}
+function ancestry(type,id){
+  const rows=type==='old'?s.oldRows:s.newRows;const map=new Map(rows.map(r=>[String(r.dept_or_section_id),r]));
+  const path=[];let cur=map.get(String(id));const guard=new Set();
+  while(cur && !guard.has(String(cur.dept_or_section_id))){path.push(cur);guard.add(String(cur.dept_or_section_id));cur=map.get(String(cur.PARENT_ID));}
+  return path;
+}
+function deriveDeptSection(type,id){
+  const chain=ancestry(type,id);
+  const self=chain[0];
+  const dept=chain.find(n=>nodeType(n)==='department')||null;
+  const section=nodeType(self)==='section'?self:null;
+  return {dept,section};
+}
+
+function matchFilter(n,type){
+  const search=$(type+'Search').value.toLowerCase().trim();
+  const level=$(type+'Level').value;const kind=$(type+'Type').value;const mapped=$(type+'Mapped').value;
+  const hasLink=type==='old'?s.links.some(l=>l.oldId===String(n.dept_or_section_id)):s.links.some(l=>l.newId===String(n.dept_or_section_id));
+  if(level && n.level_type!==level) return false;
+  if(kind && nodeType(n)!==kind) return false;
+  if(mapped==='mapped' && !hasLink) return false;
+  if(mapped==='unmapped' && hasLink) return false;
+  if(!search) return true;
+  return `${n.dept_or_section_id} ${n.name} ${n.level_type} ${n.parent_dept_name}`.toLowerCase().includes(search);
+}
+
+function subtreeMatches(node,type){
+  if(matchFilter(node,type)) return true;
+  return node.children.some(c=>subtreeMatches(c,type));
+}
+
+function renderTree(type){
+  const root=type==='old'?s.oldTree:s.newTree;const mount=$(type+'Tree');mount.innerHTML='';
+  const expanded=type==='old'?s.expandedOld:s.expandedNew;
+  const renderNode=(node,parent)=>{
+    if(!subtreeMatches(node,type)) return;
+    const id=String(node.dept_or_section_id);const hasChildren=node.children.length>0;const isOpen=expanded.has(id);
+    const item=document.createElement('div');item.className=`node ${type}`;
+    if((type==='old'&&s.selectedOld===id)||(type==='new'&&s.selectedNew===id)) item.classList.add('selected');
+    item.dataset.id=id;
+    item.innerHTML=`<div class="top"><span class="toggle">${hasChildren?(isOpen?'▾':'▸'):'•'}</span><strong>${node.name}</strong><span class="chip">ID ${id}</span></div><div class="tiny">${node.level_type||'-'} | BU ${node.BU_TYPE_ID||'-'} | Parent ${node.PARENT_ID||'-'}</div>`;
+    item.querySelector('.toggle').onclick=(e)=>{e.stopPropagation();if(hasChildren){isOpen?expanded.delete(id):expanded.add(id);renderAll();}};
+    item.onclick=()=>{if(type==='old')s.selectedOld=id;else s.selectedNew=id;renderAll();};
+    parent.appendChild(item);
+    if(hasChildren&&isOpen){const childWrap=document.createElement('div');childWrap.className='indent';parent.appendChild(childWrap);node.children.forEach(c=>renderNode(c,childWrap));}
+  };
+  root.forEach(r=>renderNode(r,mount));
+}
+
+function drawLinks(){
+  const svg=$("wires");svg.innerHTML='';const stage=$("stage").getBoundingClientRect();
+  const oldNodes=new Map([...document.querySelectorAll('.node.old')].map(n=>[n.dataset.id,n]));
+  const newNodes=new Map([...document.querySelectorAll('.node.new')].map(n=>[n.dataset.id,n]));
+  s.links.forEach((l,idx)=>{
+    const a=oldNodes.get(l.oldId),b=newNodes.get(l.newId); if(!a||!b) return;
+    const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+    const x1=ar.right-stage.left,y1=ar.top+ar.height/2-stage.top,x2=br.left-stage.left,y2=br.top+br.height/2-stage.top;
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',`M ${x1},${y1} C ${x1+90},${y1} ${x2-90},${y2} ${x2},${y2}`);p.setAttribute('fill','none');p.setAttribute('stroke','var(--link)');p.setAttribute('stroke-width','2');p.setAttribute('opacity','0.9');
+    svg.appendChild(p);
+  });
+}
+
+function renderLinksDropdown(){
+  const sel=$("selectedLink");sel.innerHTML='<option value="">Select link to remove</option>';
+  s.links.forEach((l,idx)=>{
+    const o=getNode('old',l.oldId), n=getNode('new',l.newId); const opt=document.createElement('option');
+    opt.value=String(idx); opt.textContent=`${o?.name||l.oldId} (${l.oldId}) → ${n?.name||l.newId} (${l.newId})`; sel.appendChild(opt);
+  });
+}
+
+function renderOutput(){
+  const body=$("mappingBody");body.innerHTML='';
+  s.links.forEach(l=>{
+    const oldPair=deriveDeptSection('old',l.oldId);const newPair=deriveDeptSection('new',l.newId);
+    const fmt=n=>n?`${n.name} (ID:${n.dept_or_section_id})`:'-';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${fmt(oldPair.dept)}</td><td>${fmt(oldPair.section)}</td><td>${fmt(newPair.dept)}</td><td>${fmt(newPair.section)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function populateLevels(){
+  const fill=(id,vals)=>{const el=$(id);const first=el.querySelector('option').outerHTML;el.innerHTML=first;[...new Set(vals.filter(Boolean))].sort().forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;el.appendChild(o);});};
+  fill('oldLevel',s.oldRows.map(r=>r.level_type)); fill('newLevel',s.newRows.map(r=>r.level_type));
+}
+
+function renderAll(){renderTree('old');renderTree('new');renderLinksDropdown();renderOutput();drawLinks();setStatus(`Selected OLD: ${s.selectedOld||'none'} | Selected NEW: ${s.selectedNew||'none'} | Links: ${s.links.length}`)}
+
+async function loadFiles(){
+  const of=$("oldFile").files[0], nf=$("newFile").files[0]; if(!of||!nf){setStatus('Please upload both files.');return;}
+  try{s.oldRows=await parseExcel(of);s.newRows=await parseExcel(nf);postLoad();setStatus(`Loaded ${s.oldRows.length} old and ${s.newRows.length} new rows.`);}catch(e){console.error(e);setStatus('Excel parsing failed.');}
+}
+function postLoad(){s.oldTree=buildTree(s.oldRows);s.newTree=buildTree(s.newRows);s.links=[];s.selectedOld=null;s.selectedNew=null;s.expandedOld=new Set(flatten(s.oldTree).map(n=>String(n.dept_or_section_id)));s.expandedNew=new Set(flatten(s.newTree).map(n=>String(n.dept_or_section_id)));populateLevels();renderAll();}
+
+function exportOutput(){
+  if(!s.links.length){setStatus('No mappings to export.');return;}
+  const rows=s.links.map(l=>{const o=deriveDeptSection('old',l.oldId), n=deriveDeptSection('new',l.newId);return {
+    old_department:o.dept?.name||'', old_department_id:o.dept?.dept_or_section_id||'', old_section:o.section?.name||'', old_section_id:o.section?.dept_or_section_id||'',
+    new_department:n.dept?.name||'', new_department_id:n.dept?.dept_or_section_id||'', new_section:n.section?.name||'', new_section_id:n.section?.dept_or_section_id||''
+  }});
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'mapping');XLSX.writeFile(wb,'department_section_mapping.xlsx');setStatus('Exported department_section_mapping.xlsx');
+}
+
+$("loadSample").onclick=()=>{s.oldRows=normalizeRows(sampleOld);s.newRows=normalizeRows(sampleNew);postLoad();setStatus('Loaded sample trees.');};
+$("oldFile").addEventListener('change',loadFiles); $("newFile").addEventListener('change',loadFiles);
+$("mapBtn").onclick=()=>{if(!s.selectedOld||!s.selectedNew){setStatus('Select one old and one new node first.');return;}const link={oldId:String(s.selectedOld),newId:String(s.selectedNew)};if(!s.links.some(l=>l.oldId===link.oldId&&l.newId===link.newId))s.links.push(link);renderAll();};
+$("removeLinkBtn").onclick=()=>{const i=$("selectedLink").value;if(i===''){setStatus('Choose a link to remove.');return;}s.links.splice(Number(i),1);renderAll();};
+$("clearBtn").onclick=()=>{s.links=[];renderAll();};
+$("exportBtn").onclick=exportOutput;
+['oldSearch','oldLevel','oldType','oldMapped','newSearch','newLevel','newType','newMapped'].forEach(id=>$(id).addEventListener('input',renderAll));
+window.addEventListener('resize',drawLinks);$("oldTree").addEventListener('scroll',drawLinks);$("newTree").addEventListener('scroll',drawLinks);
+$("loadSample").click();
+</script>
+</body>
+</html>
